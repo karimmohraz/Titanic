@@ -1,0 +1,60 @@
+def process_data(data):
+    import csv
+    # api.logger.info(data)
+    reader = csv.reader(data.split('\n'), delimiter=',')
+    train = []
+    categories = []
+    rows = list(reader)
+    for row in rows[1:-1]:  # skip header
+        data = row[:9]
+        category = row[9]  # 'alive'
+
+        train.append(data)
+        categories.append(category)
+        # api.logger.info(category)
+
+    # api.logger.info('last reader line: ' + str(rows[len(rows) - 1]))
+    return train, categories
+
+def train_mlp(train_data):
+    import pickle
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.neural_network import MLPClassifier
+    
+    X_train, y_train = process_data(train_data)
+    # X_test, _ = process_data(test_data)) 
+    scaler = StandardScaler()
+    # Fit only to the training data
+    scaler.fit(X_train)
+    # Now apply the transformations to the data:
+    X_train = scaler.transform(X_train)
+    # X_test = scaler.transform(X_test)
+    
+    multi_layer_perceptron = MLPClassifier(hidden_layer_sizes=(30,20,10))
+    multi_layer_perceptron.fit(X_train,y_train)
+    predictions = multi_layer_perceptron.predict(X_train)
+    from sklearn.metrics import classification_report,confusion_matrix
+    # print(confusion_matrix(y_train,predictions))
+    report = classification_report(y_train,predictions, output_dict=True)
+    
+    serialized_model = {
+                        'model': multi_layer_perceptron, 
+                        'scaler': scaler
+                        }
+    return pickle.dumps(serialized_model), report['weighted avg']['f1-score'], report['accuracy']
+
+def on_input(input):
+    api.logger.info(input)
+    modelblob, f1_score, accuracy = train_mlp(input)
+    # to send metrics to the Submit Metrics operator, create a Python dictionary of key-value pairs
+    metrics_dict = {
+        "f1-score": str(f1_score),
+        "accuracy": str(accuracy)
+    }
+    # send the metrics to the output port - Submit Metrics operator will use this to persist the metrics 
+    # api.send("metrics", api.Message(metrics_dict))
+
+    # create & send the model blob to the output port - Artifact Producer operator will use this to persist the model and create an artifact ID
+    api.send("modelblob", modelblob)
+    
+api.set_port_callback("input", on_input)

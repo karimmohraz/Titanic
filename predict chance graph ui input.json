@@ -1,0 +1,238 @@
+{
+	"properties": {},
+	"icon": "",
+	"description": "Titanic_DI - predict_chance",
+	"processes": {
+		"python3operator2": {
+			"component": "com.sap.system.python3Operator",
+			"metadata": {
+				"label": "Python3 Operator",
+				"x": 237,
+				"y": 207,
+				"height": 80,
+				"width": 120,
+				"extensible": true,
+				"config": {
+					"script": "def process_data(data):\n    import csv\n    # api.logger.info(data)\n    reader = csv.reader(data.split('\\n'), delimiter=',')\n    train = []\n    categories = []\n    rows = list(reader)\n    for row in rows[1:-1]:  # skip header\n        data = row[:9]\n        category = row[9]  # 'alive'\n\n        train.append(data)\n        categories.append(category)\n        # api.logger.info(category)\n\n    # api.logger.info('last reader line: ' + str(rows[len(rows) - 1]))\n    return train, categories\n\ndef train_mlp(train_data):\n    import pickle\n    from sklearn.preprocessing import StandardScaler\n    from sklearn.neural_network import MLPClassifier\n    \n    X_train, y_train = process_data(train_data)\n    # X_test, _ = process_data(test_data)) \n    scaler = StandardScaler()\n    # Fit only to the training data\n    scaler.fit(X_train)\n    # Now apply the transformations to the data:\n    X_train = scaler.transform(X_train)\n    # X_test = scaler.transform(X_test)\n    \n    multi_layer_perceptron = MLPClassifier(hidden_layer_sizes=(30,20,10))\n    multi_layer_perceptron.fit(X_train,y_train)\n    predictions = multi_layer_perceptron.predict(X_train)\n    from sklearn.metrics import classification_report,confusion_matrix\n    # print(confusion_matrix(y_train,predictions))\n    report = classification_report(y_train,predictions, output_dict=True)\n    \n    serialized_model = {\n                        'model': multi_layer_perceptron, \n                        'scaler': scaler\n                        }\n    return pickle.dumps(serialized_model), report['weighted avg']['f1-score'], report['accuracy']\n\ndef on_input(input):\n    api.logger.info(input)\n    modelblob, f1_score, accuracy = train_mlp(input)\n    # to send metrics to the Submit Metrics operator, create a Python dictionary of key-value pairs\n    metrics_dict = {\n        \"f1-score\": str(f1_score),\n        \"accuracy\": str(accuracy)\n    }\n    # send the metrics to the output port - Submit Metrics operator will use this to persist the metrics \n    # api.send(\"metrics\", api.Message(metrics_dict))\n\n    # create & send the model blob to the output port - Artifact Producer operator will use this to persist the model and create an artifact ID\n    api.send(\"modelblob\", modelblob)\n    \napi.set_port_callback(\"input\", on_input)\n"
+				},
+				"additionalinports": [
+					{
+						"name": "input",
+						"type": "string"
+					}
+				],
+				"additionaloutports": [
+					{
+						"name": "modelblob",
+						"type": "blob"
+					}
+				]
+			}
+		},
+		"python3operator1": {
+			"component": "com.sap.system.python3Operator",
+			"metadata": {
+				"label": "Python36 - Inference",
+				"x": 402.99999809265137,
+				"y": 99.99999952316284,
+				"height": 80,
+				"width": 120,
+				"extensible": true,
+				"config": {
+					"metadata": {},
+					"script": "import json\r\nimport numpy as np\r\nimport pandas as pd\r\nimport pickle\r\n\r\n# Global vars to keep track of model status\r\nserlzd_model = None\r\nmodel_ready = False\r\n\r\ndef preprocess_text_input(data):\r\n    # text input\r\n    # {“sex”:“female”,“embarked”:“S”,“class”:“First”,“who”:“”,“adult_male”:“False”,“deck”:null,“embark_town”:“Southhampton”,“alone”:“False”,“pclass”:1,“age”:20,“sibsp”:0,“parch”:0,“fare”:1}\r\n    # convert to integer columns: pclass sex age sibsp fare embarked who adult_male alone\r\n\r\n    # load dict in dataframe\r\n    df = pd.DataFrame([list(data.values())], columns = list(data.keys()))\r\n    # df.head()\r\n    \r\n    # cleansing\r\n    df = df.replace('', np.nan)\r\n    df['who'] = df['who'].fillna('man')\r\n    df['age'] = df['age'].fillna(0)\r\n    df['fare'] = df['fare'].fillna(0)\r\n    df['embarked'] = df['embarked'].fillna('S')  # most common embarkation port\r\n    # df.head()    \r\n    \r\n    # remove unused columns \r\n    df = df.drop(['class', 'deck', 'embark_town', 'parch'], axis=1)\r\n    # convert non-numeric data\r\n    genders = {\"male\": 0, \"female\": 1}\r\n    df['sex'] = df['sex'].map(genders)\r\n    \r\n    ports = {\"S\": 0, \"C\": 1, \"Q\": 2}\r\n    df['embarked'] = df['embarked'].map(ports)\r\n    \r\n    who = {\"man\": 1, \"woman\": 2, \"child\": 0}\r\n    df['who'] = df['who'].map(who)\r\n    \r\n    boool = {'True': 1, 'False': 0}\r\n    df['alone'] = df['alone'].map(boool)\r\n    df['adult_male'] = df['adult_male'].map(boool)\r\n    \r\n    df['age'] = df['age'].astype(int)\r\n    df.loc[ df['age'] <= 11, 'age'] = 0\r\n    df.loc[(df['age'] > 11) & (df['age'] <= 18), 'age'] = 1\r\n    df.loc[(df['age'] > 18) & (df['age'] <= 22), 'age'] = 2\r\n    df.loc[(df['age'] > 22) & (df['age'] <= 27), 'age'] = 3\r\n    df.loc[(df['age'] > 27) & (df['age'] <= 33), 'age'] = 4\r\n    df.loc[(df['age'] > 33) & (df['age'] <= 40), 'age'] = 5\r\n    df.loc[(df['age'] > 40) & (df['age'] <= 66), 'age'] = 6\r\n    df.loc[ df['age'] > 66, 'age'] = 6\r\n    \r\n    df['fare'] = df['fare'].astype(int)\r\n    df.loc[ df['fare'] <= 7.91, 'fare'] = 0\r\n    df.loc[(df['fare'] > 7.91) & (df['fare'] <= 14.454), 'fare'] = 1\r\n    df.loc[(df['fare'] > 14.454) & (df['fare'] <= 31), 'fare']   = 2\r\n    df.loc[(df['fare'] > 31) & (df['fare'] <= 99), 'fare']   = 3\r\n    df.loc[(df['fare'] > 99) & (df['fare'] <= 250), 'fare']   = 4\r\n    df.loc[ df['fare'] > 250, 'fare'] = 5\r\n    \r\n    # reorder columns to match NN input\r\n    df = df[['pclass', 'sex', 'age', 'sibsp', 'fare', 'embarked', 'who', 'adult_male', 'alone']]\r\n    \r\n    return df.to_numpy()\r\n\r\n    \r\n# Validate input data is JSON\r\ndef is_json(data):\r\n  try:\r\n    json_object = json.loads(data)\r\n  except ValueError as e:\r\n    return False\r\n  return True\r\n\r\n# When Model Blob reaches the input port\r\ndef on_model(model_blob):\r\n    global serlzd_model\r\n    global model_ready\r\n\r\n    serlzd_model = model_blob\r\n    model_ready = True\r\n    api.logger.info(\"Model Received & Ready\")\r\n    \r\n# Client POST request received\r\ndef on_input(msg):\r\n    error_message = \"\"\r\n    success = False\r\n    try:\r\n        api.logger.info(\"POST request received from Client - checking if model is ready\")\r\n        if model_ready:\r\n            api.logger.info(\"Model Ready\")\r\n            api.logger.info(\"Received data from client - validating json input\")\r\n            \r\n            user_data = msg.body.decode('utf-8')\r\n            # Received message from client, verify json data is valid\r\n            if is_json(user_data):\r\n                api.logger.info(\"Received valid json data from client - ready to use\")\r\n                \r\n                payload = json.loads(user_data)\r\n                # input_data = np.array(payload['data'])\r\n                input_data = preprocess_text_input(payload)\r\n                api.logger.info(str(input_data))\r\n                \r\n                model_dict = pickle.loads(serlzd_model)\r\n                mlp = model_dict['model']\r\n                scaler = model_dict['scaler']\r\n                input_data = scaler.transform(input_data)\r\n                \r\n                # check path\r\n                attr = msg.attributes\r\n                op_id = attr['openapi.operation_id']\r\n                api.logger.info('operation_id: ' + op_id )\r\n                if 'predict_classes' in op_id:\r\n                    prediction = mlp.predict(input_data).tolist()\r\n                else:\r\n                    prediction = mlp.predict_proba(input_data).tolist()\r\n                api.logger.info(str(prediction))\r\n\r\n                success = True\r\n            else:\r\n                api.logger.info(\"Invalid JSON received from client - cannot apply model.\")\r\n                error_message = \"Invalid JSON provided in request: \" + user_data\r\n                success = False\r\n        else:\r\n            api.logger.info(\"Model has not yet reached the input port - try again.\")\r\n            error_message = \"Model has not yet reached the input port - try again.\"\r\n            success = False\r\n    except Exception as e:\r\n        api.logger.error(e)\r\n        error_message = \"An error occurred: \" + str(e)\r\n    \r\n    if success:\r\n        # apply carried out successfully, send a response to the user\r\n        msg.body = json.dumps({'Results': prediction})\r\n    else:\r\n        msg.body = json.dumps({'Error': error_message})\r\n    \r\n    new_attributes = {'message.request.id': msg.attributes['message.request.id']}\r\n    msg.attributes =  new_attributes\r\n    api.send('output', msg)\r\n    \r\napi.set_port_callback(\"modelblob\", on_model)\r\napi.set_port_callback(\"input\", on_input)\r\n"
+				},
+				"additionalinports": [
+					{
+						"name": "input",
+						"type": "message"
+					},
+					{
+						"name": "modelblob",
+						"type": "blob"
+					}
+				],
+				"additionaloutports": [
+					{
+						"name": "output",
+						"type": "message"
+					}
+				]
+			}
+		},
+		"openapiservlow11": {
+			"component": "com.sap.openapi.server",
+			"metadata": {
+				"label": "OpenAPI Servlow",
+				"x": 17,
+				"y": 25.99999976158142,
+				"height": 80,
+				"width": 120,
+				"config": {
+					"basePath": "${deployment}",
+					"timeout": 300000,
+					"websocket": true,
+					"swaggerSpec": "{\n   \"schemes\":[\n      \"http\",\n      \"https\"\n   ],\n   \"swagger\":\"2.0\",\n   \"info\":{\n      \"description\":\"This is an example of using the OpenAPI Servlow to carry out inference with an existing model.\",\n      \"title\":\"OpenAPI demo\",\n      \"termsOfService\":\"http://www.sap.com/vora/terms/\",\n      \"contact\":{\n\n      },\n      \"license\":{\n         \"name\":\"Apache 2.0\",\n         \"url\":\"http://www.apache.org/licenses/LICENSE-2.0.html\"\n      },\n      \"version\":\"1.0.0\"\n   },\n   \"basePath\":\"/$deployment\",\n   \"paths\":{\n      \"/v1/predict_proba\":{\n         \"post\":{\n            \"description\":\"Upload data in json format\",\n            \"consumes\":[\n               \"application/json\"\n            ],\n            \"produces\":[\n               \"application/json\"\n            ],\n            \"summary\":\"probabilities per category\",\n            \"operationId\":\"predict_proba\",\n            \"parameters\":[\n               {\n                  \"type\":\"object\",\n                  \"description\":\"json data\",\n                  \"name\":\"body\",\n                  \"in\":\"body\",\n                  \"required\":true\n               }\n            ],\n            \"responses\":{\n               \"200\":{\n                  \"description\":\"Data received\"\n               },\n               \"500\":{\n                  \"description\":\"Error during upload of json\"\n               }\n            }\n         }\n      },\n      \"/v1/predict_classes\":{\n         \"post\":{\n            \"description\":\"Upload data in json format\",\n            \"consumes\":[\n               \"application/json\"\n            ],\n            \"produces\":[\n               \"application/json\"\n            ],\n            \"summary\":\"predicted category\",\n            \"operationId\":\"predict_classes\",\n            \"parameters\":[\n               {\n                  \"type\":\"object\",\n                  \"description\":\"json data\",\n                  \"name\":\"body\",\n                  \"in\":\"body\",\n                  \"required\":true\n               }\n            ],\n            \"responses\":{\n               \"200\":{\n                  \"description\":\"Data received\"\n               },\n               \"500\":{\n                  \"description\":\"Error during upload of json\"\n               }\n            }\n         }\n      }\n   },\n   \"definitions\":{\n   },\n   \"securityDefinitions\":{\n      \"UserSecurity\":{\n         \"type\":\"basic\"\n      }\n   }\n}",
+					"oneway": false
+				}
+			},
+			"name": "openapiservlow1"
+		},
+		"responseinterceptor11": {
+			"component": "com.sap.util.responseinterceptor",
+			"metadata": {
+				"label": "Response Interceptor",
+				"x": 217.99999904632568,
+				"y": 39.99999952316284,
+				"height": 80,
+				"width": 120,
+				"config": {
+					"maxWait": 300000
+				}
+			},
+			"name": "responseinterceptor1"
+		},
+		"readfile1": {
+			"component": "com.sap.storage.read",
+			"metadata": {
+				"label": "Read File",
+				"x": -48,
+				"y": 212,
+				"height": 80,
+				"width": 120,
+				"config": {
+					"service": "SDL",
+					"path": "/shared/Titanic/titanic_train.csv",
+					"onlyReadOnChange": true
+				}
+			}
+		},
+		"tostringconverter1": {
+			"component": "com.sap.util.toStringConverter",
+			"metadata": {
+				"label": "ToString Converter",
+				"x": 122,
+				"y": 238,
+				"height": 50,
+				"width": 50,
+				"config": {}
+			}
+		}
+	},
+	"groups": [
+		{
+			"name": "group1",
+			"nodes": [
+				"python3operator2"
+			],
+			"metadata": {
+				"description": "sklearnpod"
+			},
+			"tags": {
+				"pandas": "",
+				"opensuse": "",
+				"python36": "",
+				"sklearn": "",
+				"tornado": "5.0.2"
+			}
+		},
+		{
+			"name": "group2",
+			"nodes": [
+				"python3operator1"
+			],
+			"metadata": {
+				"description": "predictpod"
+			},
+			"tags": {
+				"opensuse": "",
+				"pandas": "",
+				"tornado": "5.0.2",
+				"python36": "",
+				"sklearn": ""
+			}
+		}
+	],
+	"connections": [
+		{
+			"metadata": {
+				"points": "141,65.99999976158142 184.99999952316284,65.99999976158142 184.99999952316284,70.99999952316284 212.99999904632568,70.99999952316284"
+			},
+			"src": {
+				"port": "out",
+				"process": "openapiservlow11"
+			},
+			"tgt": {
+				"port": "in",
+				"process": "responseinterceptor11"
+			}
+		},
+		{
+			"metadata": {
+				"points": "341.9999990463257,79.99999952316284 370,80 370,131 397.99999809265137,130.99999952316284"
+			},
+			"src": {
+				"port": "out",
+				"process": "responseinterceptor11"
+			},
+			"tgt": {
+				"port": "input",
+				"process": "python3operator1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "526.9999980926514,139.99999952316284 554.9999976158142,139.99999952316284 554.9999976158142,72 369.9999985694885,72 369.9999985694885,12 168.99999952316284,12 168.99999952316284,88.99999952316284 212.99999904632568,88.99999952316284"
+			},
+			"src": {
+				"port": "output",
+				"process": "python3operator1"
+			},
+			"tgt": {
+				"port": "resp",
+				"process": "responseinterceptor11"
+			}
+		},
+		{
+			"metadata": {
+				"points": "176,263 204,263 204,247 232,247"
+			},
+			"src": {
+				"port": "outstring",
+				"process": "tostringconverter1"
+			},
+			"tgt": {
+				"port": "input",
+				"process": "python3operator2"
+			}
+		},
+		{
+			"metadata": {
+				"points": "76,261 96.5,261 96.5,272 117,272"
+			},
+			"src": {
+				"port": "outFile",
+				"process": "readfile1"
+			},
+			"tgt": {
+				"port": "inmessage",
+				"process": "tostringconverter1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "361,247 379.5,247 379.5,149 397.99999809265137,148.99999952316284"
+			},
+			"src": {
+				"port": "modelblob",
+				"process": "python3operator2"
+			},
+			"tgt": {
+				"port": "modelblob",
+				"process": "python3operator1"
+			}
+		}
+	],
+	"inports": {},
+	"outports": {}
+}

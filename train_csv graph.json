@@ -1,0 +1,163 @@
+{
+	"properties": {},
+	"icon": "",
+	"description": "Titanic_DI - Training",
+	"processes": {
+		"python3operator1": {
+			"component": "com.sap.system.python3Operator",
+			"metadata": {
+				"label": "Python3",
+				"x": 285,
+				"y": 72,
+				"height": 80,
+				"width": 120,
+				"extensible": true,
+				"config": {
+					"metadata": {},
+					"script": "def process_data(data):\n    import csv\n    # api.logger.info(data)\n    reader = csv.reader(data.split('\\n'), delimiter=',')\n    train = []\n    categories = []\n    rows = list(reader)\n    for row in rows[1:-1]:  # skip header\n        data = row[:8]\n        category = row[8]\n\n        train.append(data)\n        categories.append(category)\n        # api.logger.info(category)\n\n    # api.logger.info('last reader line: ' + str(rows[len(rows) - 1]))\n    return train, categories\n\ndef train_mlp(train_data):\n    import pickle\n    from sklearn.preprocessing import StandardScaler\n    from sklearn.neural_network import MLPClassifier\n    \n    X_train, y_train = process_data(train_data)\n    # X_test, _ = process_data(test_data)) \n    scaler = StandardScaler()\n    # Fit only to the training data\n    scaler.fit(X_train)\n    # Now apply the transformations to the data:\n    X_train = scaler.transform(X_train)\n    # X_test = scaler.transform(X_test)\n    \n    multi_layer_perceptron = MLPClassifier(hidden_layer_sizes=(30,20,10))\n    multi_layer_perceptron.fit(X_train,y_train)\n    predictions = multi_layer_perceptron.predict(X_train)\n    from sklearn.metrics import classification_report,confusion_matrix\n    # print(confusion_matrix(y_train,predictions))\n    report = classification_report(y_train,predictions, output_dict=True)\n    \n    return pickle.dumps(multi_layer_perceptron), report['weighted avg']['f1-score'], report['accuracy']\n\ndef on_input(input):\n    api.logger.info(input)\n    model_blob, f1_score, accuracy = train_mlp(input)\n    # to send metrics to the Submit Metrics operator, create a Python dictionary of key-value pairs\n    metrics_dict = {\n        \"f1-score\": str(f1_score),\n        \"accuracy\": str(accuracy)\n    }\n    # send the metrics to the output port - Submit Metrics operator will use this to persist the metrics \n    api.send(\"metrics\", api.Message(metrics_dict))\n\n    # create & send the model blob to the output port - Artifact Producer operator will use this to persist the model and create an artifact ID\n    # api.send(\"modelBlob\", model_blob)\n    \napi.set_port_callback(\"input\", on_input)\n"
+				},
+				"additionalinports": [
+					{
+						"name": "input",
+						"type": "string"
+					}
+				],
+				"additionaloutports": [
+					{
+						"name": "metrics",
+						"type": "message"
+					},
+					{
+						"name": "modelBlob",
+						"type": "blob"
+					}
+				]
+			}
+		},
+		"readfile1": {
+			"component": "com.sap.storage.read",
+			"metadata": {
+				"label": "traindata",
+				"x": 17,
+				"y": 72,
+				"height": 80,
+				"width": 120,
+				"config": {
+					"metadata": {},
+					"path": "${trainFilePath}",
+					"batchRead": false,
+					"onlyReadOnChange": true,
+					"service": "SDL"
+				}
+			}
+		},
+		"tostringconverter1": {
+			"component": "com.sap.util.toStringConverter",
+			"metadata": {
+				"label": "ToString Converter",
+				"x": 186,
+				"y": 87,
+				"height": 50,
+				"width": 50,
+				"config": {}
+			}
+		},
+		"graphterminator1": {
+			"component": "com.sap.util.graphTerminator",
+			"metadata": {
+				"label": "Graph Terminator",
+				"x": 703.9999961853027,
+				"y": 12,
+				"height": 80,
+				"width": 120,
+				"config": {}
+			}
+		},
+		"submitmetrics1": {
+			"component": "com.sap.ml.submitMetrics",
+			"metadata": {
+				"label": "Submit Metrics",
+				"x": 469.9999990463257,
+				"y": 12,
+				"height": 80,
+				"width": 120,
+				"extensible": false,
+				"config": {}
+			}
+		}
+	},
+	"groups": [
+		{
+			"name": "group1",
+			"nodes": [
+				"python3operator1"
+			],
+			"metadata": {
+				"description": "Group"
+			},
+			"tags": {
+				"python36": "",
+				"opensuse": "",
+				"pandas": "",
+				"sklearn": "",
+				"tornado": "5.0.2"
+			}
+		}
+	],
+	"connections": [
+		{
+			"metadata": {
+				"points": "409,103 436.99999952316284,103 436.99999952316284,52 464.9999990463257,52"
+			},
+			"src": {
+				"port": "metrics",
+				"process": "python3operator1"
+			},
+			"tgt": {
+				"port": "metrics",
+				"process": "submitmetrics1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "141,121 181,121"
+			},
+			"src": {
+				"port": "outFile",
+				"process": "readfile1"
+			},
+			"tgt": {
+				"port": "inmessage",
+				"process": "tostringconverter1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "240,112 280,112"
+			},
+			"src": {
+				"port": "outstring",
+				"process": "tostringconverter1"
+			},
+			"tgt": {
+				"port": "input",
+				"process": "python3operator1"
+			}
+		},
+		{
+			"metadata": {
+				"points": "593.9999990463257,52 698.9999961853027,52"
+			},
+			"src": {
+				"port": "response",
+				"process": "submitmetrics1"
+			},
+			"tgt": {
+				"port": "stop",
+				"process": "graphterminator1"
+			}
+		}
+	],
+	"inports": {},
+	"outports": {}
+}
