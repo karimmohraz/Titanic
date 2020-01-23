@@ -1,0 +1,81 @@
+{
+	"info": {
+		"name": "Titanic",
+		"_postman_id": "ac770fa0-d973-c3d0-0a9a-5523e9dcb91e",
+		"description": "",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "https://vsystem.ingress.dh-rzsmhj7iwkz.di-dev2.shoot.canary.k8s-hana.ondemand.com/app/pipeline-modeler/openapi/service/1818e767-f6fe-4215-bdfb-b3679ac62bf4/v1/predict_classes/",
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "Test123!",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "default\\admin",
+							"type": "string"
+						},
+						{
+							"key": "saveHelperData",
+							"type": "any"
+						},
+						{
+							"key": "showPassword",
+							"value": false,
+							"type": "boolean"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-Requested-With",
+						"value": "XMLHttpRequest"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"data\": [[1,1,0,1,3,7,2,1]]}"
+				},
+				"url": {
+					"raw": "https://vsystem.ingress.dh-rzsmhj7iwkz.di-dev2.shoot.canary.k8s-hana.ondemand.com/app/pipeline-modeler/openapi/service/1818e767-f6fe-4215-bdfb-b3679ac62bf4/v1/predict_classes/",
+					"protocol": "https",
+					"host": [
+						"vsystem",
+						"ingress",
+						"dh-rzsmhj7iwkz",
+						"di-dev2",
+						"shoot",
+						"canary",
+						"k8s-hana",
+						"ondemand",
+						"com"
+					],
+					"path": [
+						"app",
+						"pipeline-modeler",
+						"openapi",
+						"service",
+						"1818e767-f6fe-4215-bdfb-b3679ac62bf4",
+						"v1",
+						"predict_classes",
+						""
+					]
+				},
+				"description": ""
+			},
+			"response": []
+		}
+	]
+}
